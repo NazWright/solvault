@@ -1,4 +1,3 @@
-```markdown
 # 🧠 SolVault — Solana NFT Backup, Verification & Proof System
 
 ![Version](https://img.shields.io/github/v/release/daredevtech/solvault)
@@ -238,8 +237,3 @@ Free to use · Credit appreciated · Build something remarkable.
 Your art deserves permanence —
 on-chain, in your hands, and verified by truth.
 
-```
-
----
-
-```
