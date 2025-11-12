@@ -1,0 +1,45 @@
+# Go build artifacts
+bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Compiled object files
+*.o
+*.a
+*.out
+
+# Dependency directories
+vendor/
+
+# Environment and config
+.env
+.env.local
+*.envrc
+
+# Logs and caches
+*.log
+logs/
+.cache/
+coverage.out
+
+# Backup data
+backups/
+Proofs/
+
+# System files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Temporary
+tmp/
+__pycache__/
+*.tmp

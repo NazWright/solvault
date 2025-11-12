@@ -1,0 +1,13 @@
+# SolVault Commit Message Template
+# Format: DDT-{issue-number}: <type>(<scope>): <description>
+#
+# Types: feat | fix | docs | chore | refactor | test | style | ci
+# Scope: cli | verifier | listener | storage | gui | docs
+#
+# Example:
+# DDT-12: feat(verifier): add NFT proof publishing support
+#
+# Body (optional): explain reasoning or details
+# Footer (optional): (Leave "Closes #XX" out of commits — only use in PRs)
+
+DDT- : 
