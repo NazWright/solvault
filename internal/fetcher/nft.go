@@ -107,8 +107,20 @@ func (f *Fetcher) FetchNFTInfo(ctx context.Context, mintAddress solanago.PublicK
 	if len(mintAccount.Data.GetBinary()) >= 44 {
 		// Basic mint account structure parsing
 		// This is a simplified version - in production you'd want proper mint account parsing
-		info.Supply = 1   // Most NFTs have supply of 1
-		info.Decimals = 0 // Most NFTs have 0 decimals
+		data := mintAccount.Data.GetBinary()
+
+		// Extract decimals from mint account (byte 44)
+		if len(data) > 44 {
+			info.Decimals = data[44]
+		}
+
+		// For now, assume supply of 1 for NFTs - in production you'd properly parse this
+		info.Supply = 1
+
+		// Validate this looks like an NFT (0 decimals is a strong indicator)
+		if info.Decimals != 0 {
+			return nil, fmt.Errorf("this token has %d decimals - NFTs should have 0 decimals", info.Decimals)
+		}
 	}
 
 	// Find token accounts for this mint owned by our wallet
@@ -119,16 +131,30 @@ func (f *Fetcher) FetchNFTInfo(ctx context.Context, mintAddress solanago.PublicK
 
 	var tokenAccount *rpc.TokenAccount
 	for _, account := range tokenAccounts {
-		if account.Account.Data.GetParsed() != nil {
-			parsed := account.Account.Data.GetParsed()
-			if tokenInfo, ok := parsed["info"].(map[string]interface{}); ok {
-				if mint, ok := tokenInfo["mint"].(string); ok {
-					mintPubkey, err := solanago.PublicKeyFromBase58(mint)
-					if err == nil && mintPubkey.Equals(mintAddress) {
-						tokenAccount = account
-						info.TokenAccount = account.Pubkey
-						info.Owner = f.client.Config().WalletAddress
-						break
+		// Check if we have parsed data
+		rawJSON := account.Account.Data.GetRawJSON()
+		if len(rawJSON) > 0 {
+			var parsed map[string]interface{}
+			if err := json.Unmarshal(rawJSON, &parsed); err == nil {
+				// Check if data is under "parsed" key
+				var tokenInfo map[string]interface{}
+				var ok bool
+
+				if parsedData, exists := parsed["parsed"].(map[string]interface{}); exists {
+					tokenInfo, ok = parsedData["info"].(map[string]interface{})
+				} else {
+					tokenInfo, ok = parsed["info"].(map[string]interface{})
+				}
+
+				if ok {
+					if mint, ok := tokenInfo["mint"].(string); ok {
+						mintPubkey, err := solanago.PublicKeyFromBase58(mint)
+						if err == nil && mintPubkey.Equals(mintAddress) {
+							tokenAccount = account
+							info.TokenAccount = account.Pubkey
+							info.Owner = f.client.Config().WalletAddress
+							break
+						}
 					}
 				}
 			}
