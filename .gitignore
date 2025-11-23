@@ -16,6 +16,8 @@ dist/
 
 # Dependency directories
 vendor/
+node_modules/
+package-lock.json
 
 # Environment and config
 .env
