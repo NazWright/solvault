@@ -3,9 +3,7 @@ import fetch from 'node-fetch';
 import { logger } from '../utils/logger';
 
 // NFT fetcher: MVP logic to find potential NFT mints for an owner and try to extract an on-chain metadata URI.
-// This is intentionally pragmatic: it looks for SPL token accounts with amount === 1 and decimals === 0,
-// then attempts to read the Metaplex metadata account and extract a URI substring (search for "http" in the account data).
-// The metadata parsing is heuristic (works for many typical mints) — replace with full metaplex deserialization when ready.
+// Heuristic: parsed token accounts with amount === 1 & decimals === 0, read metadata PDA, extract URI substring.
 
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
@@ -22,7 +20,6 @@ function extractUriFromAccountData(buffer: Buffer): string | null {
     const text = buffer.toString('utf8');
     const httpIndex = text.indexOf('http');
     if (httpIndex === -1) return null;
-    // read until first null char (common on chain fixed-size strings)
     const rest = text.slice(httpIndex);
     const nullIdx = rest.indexOf('\x00');
     return nullIdx === -1 ? rest.trim() : rest.slice(0, nullIdx).trim();
@@ -47,7 +44,6 @@ export async function fetchNFTsForOwner(ownerAddress: string, rpcUrl = 'https://
       const info = parsed.info;
       const tokenAmount = info.tokenAmount;
       if (!tokenAmount) continue;
-      // Heuristic: NFTs often are amount === "1" and decimals === 0
       if (tokenAmount.uiAmount === 1 && tokenAmount.decimals === 0) {
         potentialNFTs.push({ mint: info.mint, tokenAccount: pubkey.toBase58() });
       }
@@ -79,18 +75,10 @@ export async function fetchNFTsForOwner(ownerAddress: string, rpcUrl = 'https://
       logger.debug('Could not read metadata account', { mint, error: String(err) });
     }
 
-    // If we found a metadataUri, attempt friendly fetch to validate it's JSON
     if (metadataUri) {
       try {
         const r = await fetch(metadataUri, { timeout: 8000 });
-        if (r.ok) {
-          const contentType = r.headers.get('content-type') || '';
-          if (contentType.includes('application/json') || contentType.includes('json')) {
-            // we'll keep URI and let backupWriter fetch the JSON during save
-          } else {
-            // some metadata URIs are plain text that point elsewhere — we still keep the URI
-          }
-        } else {
+        if (!r.ok) {
           logger.debug('Metadata URI returned non-ok', { mint, uri: metadataUri, status: r.status });
         }
       } catch (err) {
