@@ -47,3 +47,7 @@ export const logger = {
     this.log('error', msg, meta);
   },
 };
+
+// logger added by Nazere Wright - atomic commit
+
+Signed-off-by: Nazere Wright <76058043+NazWright@users.noreply.github.com>
