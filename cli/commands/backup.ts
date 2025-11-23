@@ -3,7 +3,7 @@ import { runBackup } from '../../handlers/backupHandler';
 import { logger } from '../../utils/logger';
 
 export async function cliBackup(args: string[]) {
-  // Very small arg parser: node index.js <owner> [outDir] [rpcUrl]
+  // Very small arg parser: solvault backup <owner> [outDir] [rpcUrl]
   if (args.length < 1) {
     console.error('Usage: solvault backup <ownerWalletPubkey> [outDir] [rpcUrl]');
     process.exit(1);

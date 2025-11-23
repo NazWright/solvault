@@ -11,11 +11,14 @@ export interface NFTMetadata {
   image?: string;
 }
 
+// Default RPC endpoint - can be overridden via function parameter or environment variable
+const DEFAULT_RPC_ENDPOINT = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
 export async function fetchNFTsForOwner(
   ownerPubkey: string,
   rpcUrl?: string
 ): Promise<NFTMetadata[]> {
-  const endpoint = rpcUrl || 'https://api.mainnet-beta.solana.com';
+  const endpoint = rpcUrl || DEFAULT_RPC_ENDPOINT;
   const connection = new Connection(endpoint, 'confirmed');
   
   try {

@@ -43,7 +43,17 @@ export async function writeBackup(
       const response = await fetch(imageUrl);
       if (response.ok) {
         const buffer = await response.buffer();
-        const ext = imageUrl.endsWith('.png') ? 'png' : 'jpg';
+        // Determine file extension from URL or content-type, with fallback
+        let ext = 'jpg'; // default
+        const urlExt = imageUrl.split('.').pop()?.toLowerCase();
+        if (urlExt && ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(urlExt)) {
+          ext = urlExt;
+        } else {
+          const contentType = response.headers.get('content-type');
+          if (contentType?.includes('png')) ext = 'png';
+          else if (contentType?.includes('gif')) ext = 'gif';
+          else if (contentType?.includes('webp')) ext = 'webp';
+        }
         const imagePath = path.join(nftDir, `image.${ext}`);
         fs.writeFileSync(imagePath, buffer);
         imageSaved = imagePath;
