@@ -90,6 +90,20 @@ func (fs *FileStorage) SaveNFT(ctx context.Context, nftInfo *fetcher.NFTInfo) er
 		}
 	}
 
+	// Create media directory and save media file info if available
+	if len(nftInfo.MediaFiles) > 0 {
+		mediaDir := filepath.Join(nftDir, "media")
+		if err := os.MkdirAll(mediaDir, 0755); err != nil {
+			return fmt.Errorf("failed to create media directory: %w", err)
+		}
+
+		// Save media manifest for tracking downloaded files
+		mediaManifestPath := filepath.Join(nftDir, "media_manifest.json")
+		if err := fs.saveJSON(mediaManifestPath, nftInfo.MediaFiles); err != nil {
+			return fmt.Errorf("failed to save media manifest: %w", err)
+		}
+	}
+
 	return nil
 }
 

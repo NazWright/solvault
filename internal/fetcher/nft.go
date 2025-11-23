@@ -72,12 +72,14 @@ type NFTInfo struct {
 	FetchedAt    time.Time          `json:"fetched_at"`
 	Supply       uint64             `json:"supply"`
 	Decimals     uint8              `json:"decimals"`
+	MediaFiles   []*MediaFile       `json:"media_files,omitempty"` // Downloaded media files
 }
 
 // Fetcher handles fetching NFT metadata from various sources
 type Fetcher struct {
-	client     *solana.Client
-	httpClient *http.Client
+	client          *solana.Client
+	httpClient      *http.Client
+	mediaDownloader *MediaDownloader
 }
 
 // NewFetcher creates a new NFT metadata fetcher
@@ -87,6 +89,7 @@ func NewFetcher(client *solana.Client) *Fetcher {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		mediaDownloader: NewMediaDownloader(),
 	}
 }
 
@@ -292,8 +295,53 @@ func (f *Fetcher) fetchOffChainMetadata(ctx context.Context, uri string) (*NFTMe
 	return &metadata, nil
 }
 
+// DownloadMediaFiles downloads all media files associated with an NFT
+func (f *Fetcher) DownloadMediaFiles(ctx context.Context, nftInfo *NFTInfo, mediaDir string) error {
+	if nftInfo.Metadata == nil {
+		return nil // No metadata, no media to download
+	}
+
+	var mediaURLs []string
+
+	// Collect media URLs from metadata
+	if nftInfo.Metadata.Image != "" {
+		mediaURLs = append(mediaURLs, nftInfo.Metadata.Image)
+	}
+	if nftInfo.Metadata.AnimationURL != "" {
+		mediaURLs = append(mediaURLs, nftInfo.Metadata.AnimationURL)
+	}
+
+	// Collect URLs from properties.files array
+	if nftInfo.Metadata.Properties.Files != nil {
+		for _, file := range nftInfo.Metadata.Properties.Files {
+			if file.URI != "" {
+				mediaURLs = append(mediaURLs, file.URI)
+			}
+		}
+	}
+
+	// Download each media file
+	for _, mediaURL := range mediaURLs {
+		mediaFile, err := f.mediaDownloader.DownloadMedia(ctx, mediaURL, mediaDir)
+		if err != nil {
+			fmt.Printf("⚠️  Failed to download media %s: %v\n", mediaURL, err)
+			continue // Skip failed downloads but continue with others
+		}
+
+		// Add to NFT info
+		nftInfo.MediaFiles = append(nftInfo.MediaFiles, mediaFile)
+		fmt.Printf("✅ Downloaded media: %s (%s, %d bytes)\n", 
+			mediaFile.Filename, mediaFile.MediaType, mediaFile.Size)
+	}
+
+	return nil
+}
+
 // Close cleans up the fetcher resources
 func (f *Fetcher) Close() error {
 	f.httpClient.CloseIdleConnections()
+	if f.mediaDownloader != nil {
+		f.mediaDownloader.Close()
+	}
 	return nil
 }
