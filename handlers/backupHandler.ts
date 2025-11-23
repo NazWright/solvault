@@ -8,8 +8,7 @@ export type BackupSummary = {
   outDir: string;
   totalFound: number;
   backedUp: number;
-  items: Array<{ mint: string; tokenAccount: string; metadataUri?: string | null; imageSaved?: string | null }>;
-};
+  items: Array<{ mint: string; tokenAccount: string; metadataUri?: string | null; imageSaved?: string | null }>;};
 
 export async function runBackup(ownerAddress: string, outDirRoot?: string, rpcUrl?: string) : Promise<BackupSummary> {
   const outDirBase = outDirRoot || path.join(process.cwd(), 'solvault_backups');
