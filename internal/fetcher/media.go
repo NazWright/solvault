@@ -26,13 +26,13 @@ const (
 
 // MediaFile represents a downloaded media file
 type MediaFile struct {
-	URL         string    `json:"url"`
-	LocalPath   string    `json:"local_path"`
-	Filename    string    `json:"filename"`
-	MediaType   MediaType `json:"media_type"`
-	ContentType string    `json:"content_type"`
-	Size        int64     `json:"size"`
-	Checksum    string    `json:"checksum"`
+	URL          string    `json:"url"`
+	LocalPath    string    `json:"local_path"`
+	Filename     string    `json:"filename"`
+	MediaType    MediaType `json:"media_type"`
+	ContentType  string    `json:"content_type"`
+	Size         int64     `json:"size"`
+	Checksum     string    `json:"checksum"`
 	DownloadedAt time.Time `json:"downloaded_at"`
 }
 
@@ -99,7 +99,7 @@ func (md *MediaDownloader) DownloadMedia(ctx context.Context, mediaURL, targetDi
 	// Determine media type and adjust filename if needed
 	contentType := resp.Header.Get("Content-Type")
 	mediaType := md.determineMediaType(contentType, filename)
-	
+
 	// Add extension if missing
 	if !strings.Contains(filename, ".") {
 		if ext := md.getExtensionForContentType(contentType); ext != "" {
@@ -142,13 +142,13 @@ func (md *MediaDownloader) DownloadMedia(ctx context.Context, mediaURL, targetDi
 	checksum := fmt.Sprintf("%x", hash.Sum(nil))
 
 	mediaFile := &MediaFile{
-		URL:         mediaURL,
-		LocalPath:   localPath,
-		Filename:    filename,
-		MediaType:   mediaType,
-		ContentType: contentType,
-		Size:        bytesWritten,
-		Checksum:    checksum,
+		URL:          mediaURL,
+		LocalPath:    localPath,
+		Filename:     filename,
+		MediaType:    mediaType,
+		ContentType:  contentType,
+		Size:         bytesWritten,
+		Checksum:     checksum,
 		DownloadedAt: time.Now(),
 	}
 
@@ -164,7 +164,7 @@ func (md *MediaDownloader) extractFilename(u *url.URL) string {
 
 	// Get the last part of the path
 	filename := filepath.Base(path)
-	
+
 	// Remove query parameters if they got included
 	if idx := strings.Index(filename, "?"); idx != -1 {
 		filename = filename[:idx]
@@ -193,14 +193,14 @@ func (md *MediaDownloader) determineMediaType(contentType, filename string) Medi
 	// Fallback to filename extension
 	switch {
 	case strings.HasSuffix(filename, ".jpg") || strings.HasSuffix(filename, ".jpeg") ||
-		 strings.HasSuffix(filename, ".png") || strings.HasSuffix(filename, ".gif") ||
-		 strings.HasSuffix(filename, ".webp") || strings.HasSuffix(filename, ".svg"):
+		strings.HasSuffix(filename, ".png") || strings.HasSuffix(filename, ".gif") ||
+		strings.HasSuffix(filename, ".webp") || strings.HasSuffix(filename, ".svg"):
 		return MediaTypeImage
 	case strings.HasSuffix(filename, ".mp4") || strings.HasSuffix(filename, ".webm") ||
-		 strings.HasSuffix(filename, ".mov") || strings.HasSuffix(filename, ".avi"):
+		strings.HasSuffix(filename, ".mov") || strings.HasSuffix(filename, ".avi"):
 		return MediaTypeVideo
 	case strings.HasSuffix(filename, ".mp3") || strings.HasSuffix(filename, ".wav") ||
-		 strings.HasSuffix(filename, ".ogg"):
+		strings.HasSuffix(filename, ".ogg"):
 		return MediaTypeAudio
 	}
 
@@ -210,7 +210,7 @@ func (md *MediaDownloader) determineMediaType(contentType, filename string) Medi
 // getExtensionForContentType returns appropriate file extension for content type
 func (md *MediaDownloader) getExtensionForContentType(contentType string) string {
 	contentType = strings.ToLower(contentType)
-	
+
 	switch contentType {
 	case "image/jpeg":
 		return ".jpg"

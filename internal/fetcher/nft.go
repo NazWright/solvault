@@ -248,7 +248,7 @@ func (f *Fetcher) parseMetadataURI(data []byte) (string, error) {
 	fmt.Println("\n🔬 Analyzing Metaplex Metadata Account:")
 	fmt.Printf("   📊 Size: %d bytes\n", len(data))
 	fmt.Printf("   � Account Key: %d", data[0])
-	
+
 	if data[0] == 4 {
 		fmt.Println(" ✅ (Valid Metadata Account)")
 	} else {
@@ -264,7 +264,7 @@ func (f *Fetcher) parseMetadataURI(data []byte) (string, error) {
 	}
 
 	// Read name length (little endian u32)
-	nameLength := uint32(data[offset]) | uint32(data[offset+1])<<8 | 
+	nameLength := uint32(data[offset]) | uint32(data[offset+1])<<8 |
 		uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
 	offset += 4
 
@@ -284,7 +284,7 @@ func (f *Fetcher) parseMetadataURI(data []byte) (string, error) {
 	if offset+4 > len(data) {
 		return "", fmt.Errorf("data too short for symbol length")
 	}
-	symbolLength := uint32(data[offset]) | uint32(data[offset+1])<<8 | 
+	symbolLength := uint32(data[offset]) | uint32(data[offset+1])<<8 |
 		uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
 	offset += 4
 
@@ -304,7 +304,7 @@ func (f *Fetcher) parseMetadataURI(data []byte) (string, error) {
 	if offset+4 > len(data) {
 		return "", fmt.Errorf("data too short for URI length")
 	}
-	uriLength := uint32(data[offset]) | uint32(data[offset+1])<<8 | 
+	uriLength := uint32(data[offset]) | uint32(data[offset+1])<<8 |
 		uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
 	offset += 4
 
@@ -318,11 +318,11 @@ func (f *Fetcher) parseMetadataURI(data []byte) (string, error) {
 	}
 
 	uri := string(data[offset : offset+int(uriLength)])
-	
+
 	// Remove null bytes and whitespace padding (common in Metaplex metadata)
 	uri = strings.TrimRight(uri, "\x00")
 	uri = strings.TrimSpace(uri)
-	
+
 	displayURI := uri
 	if len(uri) > 60 {
 		displayURI = uri[:57] + "..."
@@ -343,18 +343,26 @@ func (f *Fetcher) parseMetadataURI(data []byte) (string, error) {
 	return "", fmt.Errorf("URI format not recognized: '%s'", uri)
 }
 
-// fetchOffChainMetadata retrieves and parses metadata from a URI
+// fetchOffChainMetadata retrieves and parses metadata from a URI (Arweave, IPFS, HTTP)
 func (f *Fetcher) fetchOffChainMetadata(ctx context.Context, uri string) (*NFTMetadata, error) {
+	fmt.Printf("   📡 Fetching off-chain metadata from: %s\n", f.getTruncatedURI(uri))
+
 	req, err := http.NewRequestWithContext(ctx, "GET", uri, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Add headers for better compatibility with Arweave and IPFS gateways
+	req.Header.Set("User-Agent", "SolVault/1.0 NFT-Backup-Tool")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
 
 	resp, err := f.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch metadata: %w", err)
 	}
 	defer resp.Body.Close()
+
+	fmt.Printf("   📊 Response: %d %s\n", resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP error %d fetching metadata", resp.StatusCode)
@@ -365,12 +373,161 @@ func (f *Fetcher) fetchOffChainMetadata(ctx context.Context, uri string) (*NFTMe
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
+	fmt.Printf("   📄 Metadata size: %d bytes\n", len(body))
+
+	// Try to parse as standard NFT metadata first
 	var metadata NFTMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata JSON: %w", err)
+		// If standard parsing fails, try flexible parsing
+		fmt.Printf("   🔧 Standard parsing failed, trying flexible parsing...\n")
+
+		flexibleMetadata, flexErr := f.parseFlexibleMetadata(body)
+		if flexErr != nil {
+			return nil, fmt.Errorf("failed to parse metadata JSON (standard: %v, flexible: %v)", err, flexErr)
+		}
+		metadata = *flexibleMetadata
 	}
 
+	fmt.Printf("   ✅ Successfully parsed metadata for: '%s'\n", metadata.Name)
 	return &metadata, nil
+}
+
+// getTruncatedURI returns a truncated version of URI for display
+func (f *Fetcher) getTruncatedURI(uri string) string {
+	if len(uri) <= 60 {
+		return uri
+	}
+	return uri[:57] + "..."
+}
+
+// parseFlexibleMetadata handles non-standard metadata formats common in older NFTs
+func (f *Fetcher) parseFlexibleMetadata(body []byte) (*NFTMetadata, error) {
+	// Parse into a generic map first
+	var rawData map[string]interface{}
+	if err := json.Unmarshal(body, &rawData); err != nil {
+		return nil, fmt.Errorf("failed to parse as JSON object: %w", err)
+	}
+
+	metadata := &NFTMetadata{}
+
+	// Extract fields with flexible typing
+	if name, ok := rawData["name"].(string); ok {
+		metadata.Name = name
+	}
+
+	if symbol, ok := rawData["symbol"].(string); ok {
+		metadata.Symbol = symbol
+	}
+
+	if description, ok := rawData["description"].(string); ok {
+		metadata.Description = description
+	}
+
+	if image, ok := rawData["image"].(string); ok {
+		metadata.Image = image
+	}
+
+	if animationURL, ok := rawData["animation_url"].(string); ok {
+		metadata.AnimationURL = animationURL
+	}
+
+	if externalURL, ok := rawData["external_url"].(string); ok {
+		metadata.ExternalURL = externalURL
+	}
+
+	// Handle attributes array with flexible typing
+	if attrs, ok := rawData["attributes"].([]interface{}); ok {
+		for _, attr := range attrs {
+			if attrMap, ok := attr.(map[string]interface{}); ok {
+				attribute := Attribute{}
+
+				if traitType, ok := attrMap["trait_type"].(string); ok {
+					attribute.TraitType = traitType
+				}
+
+				// Handle value as any type (string, number, bool)
+				if value, exists := attrMap["value"]; exists {
+					attribute.Value = value
+				}
+
+				metadata.Attributes = append(metadata.Attributes, attribute)
+			}
+		}
+	}
+
+	// Handle properties with flexible creator verification (number vs bool)
+	if props, ok := rawData["properties"].(map[string]interface{}); ok {
+		metadata.Properties = Properties{}
+
+		if creators, ok := props["creators"].([]interface{}); ok {
+			for _, creator := range creators {
+				if creatorMap, ok := creator.(map[string]interface{}); ok {
+					c := Creator{}
+
+					if address, ok := creatorMap["address"].(string); ok {
+						c.Address = address
+					}
+
+					if share, ok := creatorMap["share"].(float64); ok {
+						c.Share = int(share)
+					}
+
+					// Handle verified field as number or boolean
+					if verified, ok := creatorMap["verified"]; ok {
+						switch v := verified.(type) {
+						case bool:
+							c.Verified = v
+						case float64:
+							c.Verified = v != 0 // Convert number to boolean
+						case string:
+							c.Verified = v == "true" || v == "1"
+						}
+					}
+
+					metadata.Properties.Creators = append(metadata.Properties.Creators, c)
+				}
+			}
+		}
+
+		if files, ok := props["files"].([]interface{}); ok {
+			for _, file := range files {
+				if fileMap, ok := file.(map[string]interface{}); ok {
+					f := File{}
+
+					if uri, ok := fileMap["uri"].(string); ok {
+						f.URI = uri
+					}
+
+					if fileType, ok := fileMap["type"].(string); ok {
+						f.Type = fileType
+					}
+
+					metadata.Properties.Files = append(metadata.Properties.Files, f)
+				}
+			}
+		}
+
+		if category, ok := props["category"].(string); ok {
+			metadata.Properties.Category = category
+		}
+	}
+
+	// Handle seller fee basis points
+	if sellerFee, ok := rawData["seller_fee_basis_points"].(float64); ok {
+		metadata.SellerFeeBasisPoints = int(sellerFee)
+	}
+
+	// Handle collection info
+	if collection, ok := rawData["collection"].(map[string]interface{}); ok {
+		if name, ok := collection["name"].(string); ok {
+			metadata.Collection.Name = name
+		}
+		if family, ok := collection["family"].(string); ok {
+			metadata.Collection.Family = family
+		}
+	}
+
+	return metadata, nil
 }
 
 // FetchNFTInfoDemo fetches NFT information for demo purposes (without ownership check)
@@ -461,7 +618,7 @@ func (f *Fetcher) DownloadMediaFiles(ctx context.Context, nftInfo *NFTInfo, medi
 
 		// Add to NFT info
 		nftInfo.MediaFiles = append(nftInfo.MediaFiles, mediaFile)
-		fmt.Printf("✅ Downloaded media: %s (%s, %d bytes)\n", 
+		fmt.Printf("✅ Downloaded media: %s (%s, %d bytes)\n",
 			mediaFile.Filename, mediaFile.MediaType, mediaFile.Size)
 	}
 
