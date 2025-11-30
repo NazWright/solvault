@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/NazWright/solvault/internal/solana"
@@ -72,12 +73,14 @@ type NFTInfo struct {
 	FetchedAt    time.Time          `json:"fetched_at"`
 	Supply       uint64             `json:"supply"`
 	Decimals     uint8              `json:"decimals"`
+	MediaFiles   []*MediaFile       `json:"media_files,omitempty"` // Downloaded media files
 }
 
 // Fetcher handles fetching NFT metadata from various sources
 type Fetcher struct {
-	client     *solana.Client
-	httpClient *http.Client
+	client          *solana.Client
+	httpClient      *http.Client
+	mediaDownloader *MediaDownloader
 }
 
 // NewFetcher creates a new NFT metadata fetcher
@@ -87,6 +90,7 @@ func NewFetcher(client *solana.Client) *Fetcher {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		mediaDownloader: NewMediaDownloader(),
 	}
 }
 
@@ -234,46 +238,131 @@ func (f *Fetcher) deriveMetadataAddress(mintAddress solanago.PublicKey) (solanag
 	return pda, nil
 } // parseMetadataURI extracts the metadata URI from metadata account data
 func (f *Fetcher) parseMetadataURI(data []byte) (string, error) {
-	// This is a simplified parser. In practice, you'd use proper borsh deserialization
-	// or the Metaplex Go SDK for parsing metadata accounts
+	// Enhanced parser for Metaplex metadata accounts
+	// Based on the Metaplex Token Metadata standard
 
 	if len(data) < 100 {
-		return "", fmt.Errorf("metadata account data too short")
+		return "", fmt.Errorf("metadata account data too short: %d bytes", len(data))
 	}
 
-	// Skip to URI section (this is a rough approximation)
-	// Real implementation would properly deserialize the metadata struct
-	for i := 50; i < len(data)-4; i++ {
-		if i+4 < len(data) {
-			// Look for URI length prefix and extract URI
-			// This is simplified - actual implementation would follow Metaplex format
-			if data[i] == 0 && data[i+1] == 0 && data[i+2] > 0 && data[i+2] < 200 {
-				length := int(data[i+2])
-				if i+3+length < len(data) {
-					uri := string(data[i+3 : i+3+length])
-					if len(uri) > 10 && (uri[:4] == "http" || uri[:2] == "ar://") {
-						return uri, nil
-					}
-				}
-			}
-		}
+	fmt.Println("\n🔬 Analyzing Metaplex Metadata Account:")
+	fmt.Printf("   📊 Size: %d bytes\n", len(data))
+	fmt.Printf("   � Account Key: %d", data[0])
+
+	if data[0] == 4 {
+		fmt.Println(" ✅ (Valid Metadata Account)")
+	} else {
+		fmt.Printf(" ❌ (Expected 4, got %d)\n", data[0])
+		return "", fmt.Errorf("not a valid metadata account (key = %d, expected 4)", data[0])
 	}
 
-	return "", fmt.Errorf("URI not found in metadata")
+	// Skip update authority (32 bytes) and mint (32 bytes)
+	offset := 65
+
+	if offset+4 > len(data) {
+		return "", fmt.Errorf("data too short for name length")
+	}
+
+	// Read name length (little endian u32)
+	nameLength := uint32(data[offset]) | uint32(data[offset+1])<<8 |
+		uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
+	offset += 4
+
+	if nameLength > 200 {
+		return "", fmt.Errorf("name length too large: %d", nameLength)
+	}
+
+	// Skip name
+	if offset+int(nameLength) > len(data) {
+		return "", fmt.Errorf("data too short for name")
+	}
+	name := string(data[offset : offset+int(nameLength)])
+	fmt.Printf("   🏷️  Name: '%s'\n", name)
+	offset += int(nameLength)
+
+	// Read symbol length
+	if offset+4 > len(data) {
+		return "", fmt.Errorf("data too short for symbol length")
+	}
+	symbolLength := uint32(data[offset]) | uint32(data[offset+1])<<8 |
+		uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
+	offset += 4
+
+	if symbolLength > 200 {
+		return "", fmt.Errorf("symbol length too large: %d", symbolLength)
+	}
+
+	// Skip symbol
+	if offset+int(symbolLength) > len(data) {
+		return "", fmt.Errorf("data too short for symbol")
+	}
+	symbol := string(data[offset : offset+int(symbolLength)])
+	fmt.Printf("   🔖 Symbol: '%s'\n", symbol)
+	offset += int(symbolLength)
+
+	// Read URI length
+	if offset+4 > len(data) {
+		return "", fmt.Errorf("data too short for URI length")
+	}
+	uriLength := uint32(data[offset]) | uint32(data[offset+1])<<8 |
+		uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
+	offset += 4
+
+	if uriLength > 1000 {
+		return "", fmt.Errorf("URI length too large: %d", uriLength)
+	}
+
+	// Extract URI
+	if offset+int(uriLength) > len(data) {
+		return "", fmt.Errorf("data too short for URI")
+	}
+
+	uri := string(data[offset : offset+int(uriLength)])
+
+	// Remove null bytes and whitespace padding (common in Metaplex metadata)
+	uri = strings.TrimRight(uri, "\x00")
+	uri = strings.TrimSpace(uri)
+
+	displayURI := uri
+	if len(uri) > 60 {
+		displayURI = uri[:57] + "..."
+	}
+	fmt.Printf("   🌐 Metadata URI: %s\n", displayURI)
+	fmt.Println("   ✅ Metadata parsing complete!")
+
+	// Validate URI format
+	if len(uri) < 5 {
+		return "", fmt.Errorf("URI too short: '%s'", uri)
+	}
+
+	// Check for common URI prefixes
+	if uri[:4] == "http" || uri[:2] == "ar" || uri[:4] == "ipfs" {
+		return uri, nil
+	}
+
+	return "", fmt.Errorf("URI format not recognized: '%s'", uri)
 }
 
-// fetchOffChainMetadata retrieves and parses metadata from a URI
+// fetchOffChainMetadata retrieves and parses metadata from a URI (Arweave, IPFS, HTTP)
 func (f *Fetcher) fetchOffChainMetadata(ctx context.Context, uri string) (*NFTMetadata, error) {
+	fmt.Printf("   📡 Fetching off-chain metadata from: %s\n", f.getTruncatedURI(uri))
+
 	req, err := http.NewRequestWithContext(ctx, "GET", uri, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Add headers for better compatibility with Arweave and IPFS gateways
+	req.Header.Set("User-Agent", "SolVault/1.0 NFT-Backup-Tool")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
 
 	resp, err := f.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch metadata: %w", err)
 	}
 	defer resp.Body.Close()
+
+	fmt.Printf("   📊 Response: %d %s\n", resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP error %d fetching metadata", resp.StatusCode)
@@ -284,16 +373,263 @@ func (f *Fetcher) fetchOffChainMetadata(ctx context.Context, uri string) (*NFTMe
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
+	fmt.Printf("   📄 Metadata size: %d bytes\n", len(body))
+
+	// Try to parse as standard NFT metadata first
 	var metadata NFTMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata JSON: %w", err)
+		// If standard parsing fails, try flexible parsing
+		fmt.Printf("   🔧 Standard parsing failed, trying flexible parsing...\n")
+
+		flexibleMetadata, flexErr := f.parseFlexibleMetadata(body)
+		if flexErr != nil {
+			return nil, fmt.Errorf("failed to parse metadata JSON (standard: %v, flexible: %v)", err, flexErr)
+		}
+		metadata = *flexibleMetadata
 	}
 
+	fmt.Printf("   ✅ Successfully parsed metadata for: '%s'\n", metadata.Name)
 	return &metadata, nil
+}
+
+// getTruncatedURI returns a truncated version of URI for display
+func (f *Fetcher) getTruncatedURI(uri string) string {
+	if len(uri) <= 60 {
+		return uri
+	}
+	return uri[:57] + "..."
+}
+
+// parseFlexibleMetadata handles non-standard metadata formats common in older NFTs
+func (f *Fetcher) parseFlexibleMetadata(body []byte) (*NFTMetadata, error) {
+	// Parse into a generic map first
+	var rawData map[string]interface{}
+	if err := json.Unmarshal(body, &rawData); err != nil {
+		return nil, fmt.Errorf("failed to parse as JSON object: %w", err)
+	}
+
+	metadata := &NFTMetadata{}
+
+	// Extract fields with flexible typing
+	if name, ok := rawData["name"].(string); ok {
+		metadata.Name = name
+	}
+
+	if symbol, ok := rawData["symbol"].(string); ok {
+		metadata.Symbol = symbol
+	}
+
+	if description, ok := rawData["description"].(string); ok {
+		metadata.Description = description
+	}
+
+	if image, ok := rawData["image"].(string); ok {
+		metadata.Image = image
+	}
+
+	if animationURL, ok := rawData["animation_url"].(string); ok {
+		metadata.AnimationURL = animationURL
+	}
+
+	if externalURL, ok := rawData["external_url"].(string); ok {
+		metadata.ExternalURL = externalURL
+	}
+
+	// Handle attributes array with flexible typing
+	if attrs, ok := rawData["attributes"].([]interface{}); ok {
+		for _, attr := range attrs {
+			if attrMap, ok := attr.(map[string]interface{}); ok {
+				attribute := Attribute{}
+
+				if traitType, ok := attrMap["trait_type"].(string); ok {
+					attribute.TraitType = traitType
+				}
+
+				// Handle value as any type (string, number, bool)
+				if value, exists := attrMap["value"]; exists {
+					attribute.Value = value
+				}
+
+				metadata.Attributes = append(metadata.Attributes, attribute)
+			}
+		}
+	}
+
+	// Handle properties with flexible creator verification (number vs bool)
+	if props, ok := rawData["properties"].(map[string]interface{}); ok {
+		metadata.Properties = Properties{}
+
+		if creators, ok := props["creators"].([]interface{}); ok {
+			for _, creator := range creators {
+				if creatorMap, ok := creator.(map[string]interface{}); ok {
+					c := Creator{}
+
+					if address, ok := creatorMap["address"].(string); ok {
+						c.Address = address
+					}
+
+					if share, ok := creatorMap["share"].(float64); ok {
+						c.Share = int(share)
+					}
+
+					// Handle verified field as number or boolean
+					if verified, ok := creatorMap["verified"]; ok {
+						switch v := verified.(type) {
+						case bool:
+							c.Verified = v
+						case float64:
+							c.Verified = v != 0 // Convert number to boolean
+						case string:
+							c.Verified = v == "true" || v == "1"
+						}
+					}
+
+					metadata.Properties.Creators = append(metadata.Properties.Creators, c)
+				}
+			}
+		}
+
+		if files, ok := props["files"].([]interface{}); ok {
+			for _, file := range files {
+				if fileMap, ok := file.(map[string]interface{}); ok {
+					f := File{}
+
+					if uri, ok := fileMap["uri"].(string); ok {
+						f.URI = uri
+					}
+
+					if fileType, ok := fileMap["type"].(string); ok {
+						f.Type = fileType
+					}
+
+					metadata.Properties.Files = append(metadata.Properties.Files, f)
+				}
+			}
+		}
+
+		if category, ok := props["category"].(string); ok {
+			metadata.Properties.Category = category
+		}
+	}
+
+	// Handle seller fee basis points
+	if sellerFee, ok := rawData["seller_fee_basis_points"].(float64); ok {
+		metadata.SellerFeeBasisPoints = int(sellerFee)
+	}
+
+	// Handle collection info
+	if collection, ok := rawData["collection"].(map[string]interface{}); ok {
+		if name, ok := collection["name"].(string); ok {
+			metadata.Collection.Name = name
+		}
+		if family, ok := collection["family"].(string); ok {
+			metadata.Collection.Family = family
+		}
+	}
+
+	return metadata, nil
+}
+
+// FetchNFTInfoDemo fetches NFT information for demo purposes (without ownership check)
+func (f *Fetcher) FetchNFTInfoDemo(ctx context.Context, mintAddress solanago.PublicKey) (*NFTInfo, error) {
+	info := &NFTInfo{
+		MintAddress: mintAddress,
+		FetchedAt:   time.Now(),
+	}
+
+	// Get mint account info
+	mintAccount, err := f.client.GetAccountInfo(ctx, mintAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mint account info: %w", err)
+	}
+
+	// Parse mint data to get supply and decimals
+	if len(mintAccount.Data.GetBinary()) >= 44 {
+		data := mintAccount.Data.GetBinary()
+
+		// Extract decimals from mint account (byte 44)
+		if len(data) > 44 {
+			info.Decimals = data[44]
+		}
+
+		// For now, assume supply of 1 for NFTs - in production you'd properly parse this
+		info.Supply = 1
+
+		// Validate this looks like an NFT (0 decimals is a strong indicator)
+		if info.Decimals != 0 {
+			return nil, fmt.Errorf("this token has %d decimals - NFTs should have 0 decimals", info.Decimals)
+		}
+	}
+
+	// Set demo owner (we don't check actual ownership for demo)
+	demoWallet, _ := solanago.PublicKeyFromBase58("11111111111111111111111111111112")
+	info.Owner = demoWallet
+	info.TokenAccount = demoWallet // Dummy token account for demo
+
+	// Try to find and fetch metadata
+	metadataURI, err := f.findMetadataURI(ctx, mintAddress)
+	if err != nil {
+		fmt.Printf("⚠️  Could not find metadata URI for %s: %v\n", mintAddress.String(), err)
+	} else if metadataURI != "" {
+		info.MetadataURI = metadataURI
+		metadata, err := f.fetchOffChainMetadata(ctx, metadataURI)
+		if err != nil {
+			fmt.Printf("⚠️  Could not fetch off-chain metadata: %v\n", err)
+		} else {
+			info.Metadata = metadata
+		}
+	}
+
+	return info, nil
+}
+
+// DownloadMediaFiles downloads all media files associated with an NFT
+func (f *Fetcher) DownloadMediaFiles(ctx context.Context, nftInfo *NFTInfo, mediaDir string) error {
+	if nftInfo.Metadata == nil {
+		return nil // No metadata, no media to download
+	}
+
+	var mediaURLs []string
+
+	// Collect media URLs from metadata
+	if nftInfo.Metadata.Image != "" {
+		mediaURLs = append(mediaURLs, nftInfo.Metadata.Image)
+	}
+	if nftInfo.Metadata.AnimationURL != "" {
+		mediaURLs = append(mediaURLs, nftInfo.Metadata.AnimationURL)
+	}
+
+	// Collect URLs from properties.files array
+	if nftInfo.Metadata.Properties.Files != nil {
+		for _, file := range nftInfo.Metadata.Properties.Files {
+			if file.URI != "" {
+				mediaURLs = append(mediaURLs, file.URI)
+			}
+		}
+	}
+
+	// Download each media file
+	for _, mediaURL := range mediaURLs {
+		mediaFile, err := f.mediaDownloader.DownloadMedia(ctx, mediaURL, mediaDir)
+		if err != nil {
+			fmt.Printf("⚠️  Failed to download media %s: %v\n", mediaURL, err)
+			continue // Skip failed downloads but continue with others
+		}
+
+		// Add to NFT info
+		nftInfo.MediaFiles = append(nftInfo.MediaFiles, mediaFile)
+		fmt.Printf("✅ Downloaded media: %s (%s, %d bytes)\n",
+			mediaFile.Filename, mediaFile.MediaType, mediaFile.Size)
+	}
+
+	return nil
 }
 
 // Close cleans up the fetcher resources
 func (f *Fetcher) Close() error {
 	f.httpClient.CloseIdleConnections()
+	if f.mediaDownloader != nil {
+		f.mediaDownloader.Close()
+	}
 	return nil
 }
