@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -29,10 +30,22 @@ Example:
 var (
 	backupDir string
 	force     bool
+	walletAddr string
 )
 
 func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("🚀 Initializing SolVault...")
+	var walletAddr string
+	walletAddr = strings.TrimSpace(walletAddr)
+	if walletAddr == "" {
+		fmt.Print("Enter your Solana wallet address: ")
+		fmt.Scanln(&walletAddr)
+		walletAddr = strings.TrimSpace(walletAddr)
+		if walletAddr == "" {
+			fmt.Println("❌ Wallet address is required.")
+			return nil
+		}
+	}
 
 	// Set default backup directory if not specified
 	if backupDir == "" {
@@ -120,4 +133,5 @@ func init() {
 
 	initCmd.Flags().StringVar(&backupDir, "backup-dir", "", "custom backup directory path")
 	initCmd.Flags().BoolVar(&force, "force", false, "overwrite existing .env file")
+	initCmd.Flags().StringVar(&walletAddr, "wallet", "", "Solana wallet address to use for initialization")
 }
