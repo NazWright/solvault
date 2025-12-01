@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/NazWright/solvault/internal/fetcher"
 	"github.com/NazWright/solvault/internal/solana"
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/spf13/cobra"
 )
 
 // listTokensCmd represents the list-tokens command
+var prettyOutput bool
 var listTokensCmd = &cobra.Command{
 	Use:   "list-tokens",
 	Short: "List all NFTs in your wallet",
@@ -60,33 +63,28 @@ along with their mint addresses that you can use for testing.`,
 		fmt.Printf("🔍 Found %d token account(s), filtering for NFTs...\n\n", len(tokenAccounts))
 
 		nftCount := 0
+		fetcherObj := fetcher.NewFetcher(client)
 
 		for _, account := range tokenAccounts {
-			// Try to parse the token info
 			rawJSON := account.Account.Data.GetRawJSON()
 			if len(rawJSON) > 0 {
 				var parsed map[string]interface{}
 				if err := json.Unmarshal(rawJSON, &parsed); err == nil {
-					// Check if data is under "parsed" key
 					var tokenInfo map[string]interface{}
 					var ok bool
-
 					if parsedData, exists := parsed["parsed"].(map[string]interface{}); exists {
 						tokenInfo, ok = parsedData["info"].(map[string]interface{})
 					} else {
 						tokenInfo, ok = parsed["info"].(map[string]interface{})
 					}
-
 					if ok {
 						var mint string
 						var decimals float64
 						var amount string
 						var uiAmount float64
-
 						if m, ok := tokenInfo["mint"].(string); ok {
 							mint = m
 						}
-
 						if tokenAmount, ok := tokenInfo["tokenAmount"].(map[string]interface{}); ok {
 							if a, ok := tokenAmount["amount"].(string); ok {
 								amount = a
@@ -98,20 +96,87 @@ along with their mint addresses that you can use for testing.`,
 								uiAmount = ua
 							}
 						}
-
-						// Check if this is likely an NFT (supply=1, decimals=0, amount="1")
 						if decimals == 0 && amount == "1" && uiAmount == 1 {
 							nftCount++
-							fmt.Printf("NFT #%d:\n", nftCount)
-							fmt.Printf("  Account Address: %s\n", account.Pubkey.String())
-							fmt.Printf("  Mint Address:    %s\n", mint)
-							fmt.Printf("  Amount:          %s (Supply: 1)\n", amount)
-							fmt.Printf("  Decimals:        %.0f (NFT characteristic)\n", decimals)
-
-							if state, ok := tokenInfo["state"].(string); ok {
-								fmt.Printf("  State:           %s\n", state)
+							mintPubkey, err := solanago.PublicKeyFromBase58(mint)
+							if err == nil {
+								ctxMeta, cancelMeta := context.WithTimeout(context.Background(), 10*time.Second)
+								defer cancelMeta()
+								nftInfo, err := fetcherObj.FetchNFTInfo(ctxMeta, mintPubkey)
+								if prettyOutput {
+									fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+									fmt.Printf("🖼️  NFT #%d\n", nftCount)
+									if nftInfo.Metadata != nil {
+										if nftInfo.Metadata.Name != "" {
+											fmt.Printf("🏷️  Name: %s\n", nftInfo.Metadata.Name)
+											fmt.Println("   The name of your NFT.")
+										}
+										if nftInfo.Metadata.Collection.Name != "" {
+											fmt.Printf("📚 Collection: %s\n", nftInfo.Metadata.Collection.Name)
+											fmt.Println("   The collection or series this NFT belongs to.")
+										}
+										if nftInfo.Metadata.Description != "" {
+											fmt.Printf("📝 Description: %s\n", nftInfo.Metadata.Description)
+											fmt.Println("   What this NFT is about.")
+										}
+										if nftInfo.Metadata.Image != "" {
+											fmt.Printf("🖼️  Image URL: %s\n", nftInfo.Metadata.Image)
+											fmt.Println("   Link to the NFT's image.")
+										}
+										fmt.Printf("🆔 NFT ID: %s\n", mint)
+										fmt.Println("   Unique identifier for this NFT.")
+										if len(nftInfo.Metadata.Attributes) > 0 {
+											fmt.Printf("🔖 Attributes: ")
+											for _, attr := range nftInfo.Metadata.Attributes {
+												fmt.Printf("[%s: %v] ", attr.TraitType, attr.Value)
+											}
+											fmt.Println()
+											fmt.Println("   Special traits or properties.")
+										}
+										fmt.Printf("🔗 Metadata URI: %s\n", nftInfo.MetadataURI)
+										fmt.Println("   Link to full NFT details.")
+									} else {
+										fmt.Printf("🆔 NFT ID: %s\n", mint)
+										fmt.Printf("🔗 Metadata URI: %s\n", nftInfo.MetadataURI)
+										fmt.Printf("⚠️  Metadata not found\n")
+									}
+									fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+								} else {
+									// Default technical output
+									fmt.Printf("NFT #%d:\n", nftCount)
+									fmt.Printf("  Account Address: %s\n", account.Pubkey.String())
+									fmt.Printf("  Mint Address:    %s\n", mint)
+									if err == nil && nftInfo.Metadata != nil {
+										fmt.Printf("  Name:            %s\n", nftInfo.Metadata.Name)
+										fmt.Printf("  Symbol:          %s\n", nftInfo.Metadata.Symbol)
+										fmt.Printf("  Description:     %s\n", nftInfo.Metadata.Description)
+										fmt.Printf("  Image:           %s\n", nftInfo.Metadata.Image)
+										if nftInfo.Metadata.Collection.Name != "" {
+											fmt.Printf("  Collection:      %s\n", nftInfo.Metadata.Collection.Name)
+										}
+										if len(nftInfo.Metadata.Attributes) > 0 {
+											fmt.Printf("  Attributes:      ")
+											for _, attr := range nftInfo.Metadata.Attributes {
+												fmt.Printf("[%s: %v] ", attr.TraitType, attr.Value)
+											}
+											fmt.Println()
+										}
+										fmt.Printf("  Metadata URI:    %s\n", nftInfo.MetadataURI)
+									} else if err == nil {
+										fmt.Printf("  Metadata URI:    %s\n", nftInfo.MetadataURI)
+									} else {
+										fmt.Printf("  Metadata:        (not found)\n")
+									}
+									fmt.Printf("  Amount:          %s (Supply: 1)\n", amount)
+									fmt.Printf("  Decimals:        %.0f (NFT characteristic)\n", decimals)
+									if state, ok := tokenInfo["state"].(string); ok {
+										fmt.Printf("  State:           %s\n", state)
+									}
+									fmt.Println()
+								}
+							} else {
+								fmt.Printf("  Metadata:        (invalid mint pubkey)\n")
 							}
-							fmt.Println()
 						}
 					}
 				}
@@ -142,4 +207,5 @@ func getKeys(m map[string]interface{}) []string {
 
 func init() {
 	rootCmd.AddCommand(listTokensCmd)
+	listTokensCmd.Flags().BoolVar(&prettyOutput, "pretty", false, "Show NFTs in a visually friendly format")
 }
