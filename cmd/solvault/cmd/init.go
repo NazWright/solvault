@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -27,12 +28,29 @@ Example:
 }
 
 var (
-	backupDir string
-	force     bool
+	backupDir  string
+	force      bool // force overwrite existing .env
+	walletAddr string
 )
 
 func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("🚀 Initializing SolVault...")
+	// Accept wallet address as positional argument, fallback to flag, then prompt
+	var inputWallet string
+	if len(args) > 0 {
+		inputWallet = strings.TrimSpace(args[0])
+	} else if walletAddr != "" {
+		inputWallet = strings.TrimSpace(walletAddr)
+	}
+	if inputWallet == "" {
+		fmt.Print("Enter your Solana wallet address: ")
+		fmt.Scanln(&inputWallet)
+		inputWallet = strings.TrimSpace(inputWallet)
+		if inputWallet == "" {
+			fmt.Println("❌ Wallet address is required.")
+			return nil
+		}
+	}
 
 	// Set default backup directory if not specified
 	if backupDir == "" {
@@ -48,8 +66,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Create .env file
-	if err := createEnvFile(); err != nil {
+	// Create .env file with wallet address
+	if err := createEnvFile(inputWallet); err != nil {
 		return err
 	}
 
@@ -57,9 +75,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   Backup directory: %s\n", backupDir)
 	fmt.Println("   Configuration: .env")
 	fmt.Println("")
-	fmt.Println("Next steps:")
-	fmt.Println("1. Edit .env with your Solana RPC endpoint and wallet address")
-	fmt.Println("2. Run 'solvault watch' to start monitoring for new NFTs")
+	fmt.Printf("SolVault configured for wallet address: %s\n", inputWallet)
+	// TODO: Add next steps or further instructions here
 
 	return nil
 }
@@ -74,7 +91,7 @@ func createBackupDirectory() error {
 	return nil
 }
 
-func createEnvFile() error {
+func createEnvFile(wallet string) error {
 	envPath := ".env"
 
 	// Check if .env already exists
@@ -93,7 +110,7 @@ SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 SOLANA_WEBSOCKET_URL=wss://api.mainnet-beta.solana.com
 
 # Your Solana wallet address to monitor
-WALLET_ADDRESS=your_wallet_address_here
+WALLET_ADDRESS=%s
 
 # Backup Settings
 BACKUP_DIRECTORY=%s
@@ -106,7 +123,7 @@ PUBLISH_API_KEY=
 POLL_INTERVAL_SECONDS=30
 MAX_RETRIES=3
 TIMEOUT_SECONDS=60
-`, backupDir)
+`, wallet, backupDir)
 
 	if err := os.WriteFile(envPath, []byte(envContent), 0644); err != nil {
 		return fmt.Errorf("failed to create .env file: %w", err)
@@ -120,4 +137,5 @@ func init() {
 
 	initCmd.Flags().StringVar(&backupDir, "backup-dir", "", "custom backup directory path")
 	initCmd.Flags().BoolVar(&force, "force", false, "overwrite existing .env file")
+	initCmd.Flags().StringVar(&walletAddr, "wallet", "", "Solana wallet address to use for initialization")
 }
