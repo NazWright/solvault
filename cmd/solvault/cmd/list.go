@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NazWright/solvault/internal/solana"
 	"github.com/spf13/cobra"
 )
 
@@ -40,11 +41,12 @@ var (
 func runList(cmd *cobra.Command, args []string) error {
 	fmt.Println("📋 Listing backed-up NFTs...")
 
-	// Get backup directory from config or default
-	backupDir, err := getBackupDirectory()
+	// Load configuration using centralized loader
+	config, err := solana.LoadConfig()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load config: %w", err)
 	}
+	backupDir := config.BackupDirectory
 
 	// Scan for NFT directories
 	nfts, err := scanNFTDirectories(backupDir)
@@ -80,14 +82,7 @@ type NFTInfo struct {
 	Status      string
 }
 
-func getBackupDirectory() (string, error) {
-	// TODO: Load from .env configuration
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(homeDir, "SolVaultBackups"), nil
-}
+// getBackupDirectory is now handled by config.BackupDirectory from solana.LoadConfig()
 
 func scanNFTDirectories(backupDir string) ([]NFTInfo, error) {
 	var nfts []NFTInfo

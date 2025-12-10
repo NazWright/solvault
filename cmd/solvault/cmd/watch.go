@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NazWright/solvault/internal/solana"
 	"github.com/spf13/cobra"
 )
 
@@ -37,12 +38,15 @@ var (
 )
 
 func runWatch(cmd *cobra.Command, args []string) error {
+
 	fmt.Println("👀 Starting SolVault watcher...")
 
-	// TODO: Load configuration from .env
-	if err := validateConfig(); err != nil {
-		return err
+	// Load configuration using centralized loader
+	config, err := solana.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
 	}
+	fmt.Printf("✅ Configuration loaded for wallet: %s\n", config.WalletAddress.String())
 
 	if daemon {
 		fmt.Println("🔄 Running in daemon mode...")

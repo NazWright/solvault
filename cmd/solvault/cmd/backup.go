@@ -2,9 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"strings"
 
+	"github.com/NazWright/solvault/internal/solana"
 	"github.com/spf13/cobra"
 )
 
@@ -24,24 +23,16 @@ This command will:
 }
 
 func runBackup(cmd *cobra.Command, args []string) error {
-	// Read wallet address from .env credential cache
-	envPath := ".env"
-	data, err := os.ReadFile(envPath)
+	// Load configuration using centralized loader
+	config, err := solana.LoadConfig()
 	if err != nil {
-		fmt.Println("❌ Could not read .env file. Please run 'solvault init' first.")
+		fmt.Println("❌ Could not load config. Please run 'solvault init' first.")
 		return nil
 	}
-	lines := strings.Split(string(data), "\n")
-	var walletAddr string
-	for _, line := range lines {
-		if strings.HasPrefix(line, "WALLET_ADDRESS=") {
-			walletAddr = strings.TrimPrefix(line, "WALLET_ADDRESS=")
-			walletAddr = strings.TrimSpace(walletAddr)
-			break
-		}
-	}
+
+	walletAddr := config.WalletAddress.String()
 	if walletAddr == "" {
-		fmt.Println("❌ Wallet address not found in .env. Please run 'solvault init' and enter your wallet address.")
+		fmt.Println("❌ Wallet address not found in config. Please run 'solvault init' and enter your wallet address.")
 		return nil
 	}
 

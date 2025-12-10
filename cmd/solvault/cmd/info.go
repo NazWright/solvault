@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/NazWright/solvault/internal/solana"
 	"github.com/spf13/cobra"
 )
 
@@ -39,11 +40,12 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	identifier := args[0]
 	fmt.Printf("🔍 Looking up NFT: %s\n", identifier)
 
-	// Get backup directory
-	backupDir, err := getBackupDirectory()
+	// Load configuration using centralized loader
+	config, err := solana.LoadConfig()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load config: %w", err)
 	}
+	backupDir := config.BackupDirectory
 
 	// Find NFT directory
 	nftPath, err := findNFTDirectory(backupDir, identifier)
